@@ -1,0 +1,63 @@
+CREATE TABLE IF NOT EXISTS source (
+  id SERIAL PRIMARY KEY,
+  name TEXT NOT NULL UNIQUE,
+  base_url TEXT,
+  reliability SMALLINT NOT NULL DEFAULT 50,
+  created_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS brand (
+  id SERIAL PRIMARY KEY,
+  name TEXT NOT NULL,
+  name_norm TEXT NOT NULL UNIQUE,
+  created_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS perfumer (
+  id SERIAL PRIMARY KEY,
+  name TEXT NOT NULL,
+  name_norm TEXT NOT NULL UNIQUE,
+  created_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS note (
+  id SERIAL PRIMARY KEY,
+  name TEXT NOT NULL,
+  name_norm TEXT NOT NULL UNIQUE,
+  created_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS perfume (
+  id SERIAL PRIMARY KEY,
+  brand_id INT NOT NULL REFERENCES brand(id),
+  name TEXT NOT NULL,
+  name_norm TEXT NOT NULL,
+  year SMALLINT,
+  concentration TEXT,
+  gender TEXT,
+  created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+  UNIQUE (brand_id, name_norm)
+);
+
+CREATE TABLE IF NOT EXISTS perfume_perfumer (
+  perfume_id INT NOT NULL REFERENCES perfume(id) ON DELETE CASCADE,
+  perfumer_id INT NOT NULL REFERENCES perfumer(id) ON DELETE CASCADE,
+  role TEXT,
+  PRIMARY KEY (perfume_id, perfumer_id)
+);
+
+CREATE TABLE IF NOT EXISTS perfume_note (
+  perfume_id INT NOT NULL REFERENCES perfume(id) ON DELETE CASCADE,
+  note_id INT NOT NULL REFERENCES note(id) ON DELETE CASCADE,
+  note_position TEXT,
+  PRIMARY KEY (perfume_id, note_id)
+);
+
+CREATE TABLE IF NOT EXISTS perfume_source (
+  perfume_id INT NOT NULL REFERENCES perfume(id) ON DELETE CASCADE,
+  source_id INT NOT NULL REFERENCES source(id) ON DELETE CASCADE,
+  url TEXT NOT NULL,
+  raw_json TEXT,
+  last_seen TIMESTAMP NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (perfume_id, source_id)
+);
