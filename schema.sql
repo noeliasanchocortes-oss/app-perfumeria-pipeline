@@ -61,3 +61,4 @@ CREATE TABLE IF NOT EXISTS perfume_source (
   last_seen TIMESTAMP NOT NULL DEFAULT NOW(),
   PRIMARY KEY (perfume_id, source_id)
 );
+
