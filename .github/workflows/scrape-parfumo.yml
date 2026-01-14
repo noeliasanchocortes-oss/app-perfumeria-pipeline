@@ -1,14 +1,20 @@
-name: Scrape Parfumo (Top Men)
+name: Scrape Parfumo
 
 on:
   workflow_dispatch:
     inputs:
+      mode:
+        description: "Modo de scraping: top_men o brand"
+        required: false
+        default: "top_men"
+      brand:
+        description: "Marca (solo si mode=brand). Ej: Dior"
+        required: false
+        default: ""
       limit:
         description: "Cuantos perfumes scrapear (ej 10, 50, 100)"
         required: false
         default: "10"
-  schedule:
-    - cron: "0 */12 * * *"   # cada 12 horas (UTC)
 
 jobs:
   scrape:
@@ -27,5 +33,7 @@ jobs:
       - name: Run scraper
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
-          LIMIT: ${{ github.event.inputs.limit || '10' }}
+          MODE: ${{ github.event.inputs.mode }}
+          BRAND: ${{ github.event.inputs.brand }}
+          LIMIT: ${{ github.event.inputs.limit }}
         run: python scrape_parfumo.py
