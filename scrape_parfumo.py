@@ -31,46 +31,49 @@ def http_get(url: str) -> str:
     r.raise_for_status()
     return r.text
 
-def extract_perfume_urls_from_index(html: str, limit: int) -> list[str]:
+def extract_perfume_urls_from_index(html: str, limit: int, brand_slug: str | None = None) -> list[str]:
     """
-    Extrae URLs de perfumes desde páginas tipo Top o Brand.
-    Usamos un selector más “semántico” (schema.org/Product) para evitar 0 resultados y evitar menús/footers.
+    Extrae URLs de perfumes desde páginas Top o Brand.
+    Para Brand pages, filtra estrictamente por /Perfumes/<Brand>/slug
     """
     soup = BeautifulSoup(html, "lxml")
-    urls: list[str] = []
-    seen: set[str] = set()
+    urls = []
+    seen = set()
 
-    # 1) Intenta primero el contenedor típico con schema.org/Product
-    for a in soup.select("div[itemtype='http://schema.org/Product'] a[href]"):
-        href = a.get("href", "")
-        if not href:
-            continue
-        if href.startswith("/Perfumes/") or href.startswith("/Parfums/"):
-            parts = href.strip("/").split("/")
-            if len(parts) >= 3:  # /Perfumes/Brand/slug
-                full = urljoin(BASE, href)
-                if full not in seen:
-                    seen.add(full)
-                    urls.append(full)
-        if len(urls) >= limit:
-            return urls[:limit]
-
-    # 2) Fallback: si no encontró nada, vuelve al método general (por si la página no usa ese contenedor)
     for a in soup.select("a[href]"):
-        href = a.get("href", "")
+        href = a.get("href", "").strip()
         if not href:
             continue
-        if href.startswith("/Perfumes/") or href.startswith("/Parfums/"):
-            parts = href.strip("/").split("/")
-            if len(parts) >= 3:
-                full = urljoin(BASE, href)
-                if full not in seen:
-                    seen.add(full)
-                    urls.append(full)
+
+        # Normalizamos
+        if not href.startswith("/Perfumes/"):
+            continue
+
+        parts = href.strip("/").split("/")
+        if len(parts) < 3:
+            continue
+
+        _, brand, slug = parts[:3]
+
+        # Si estamos en modo brand, exigimos que coincida la marca
+        if brand_slug and brand.lower() != brand_slug.lower():
+            continue
+
+        # Evitar links genéricos o duplicados
+        if slug.lower() in {"reviews", "ratings", "images"}:
+            continue
+
+        full = urljoin(BASE, href)
+        if full in seen:
+            continue
+
+        seen.add(full)
+        urls.append(full)
+
         if len(urls) >= limit:
             break
 
-    return urls[:limit]
+    return urls
 
 def parse_gender_year_and_name(soup: BeautifulSoup) -> tuple[str | None, int | None, str | None]:
     text = soup.get_text("\n", strip=True)
