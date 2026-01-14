@@ -1,0 +1,33 @@
+name: Scrape Parfumo - Top Men
+
+on:
+  workflow_dispatch:
+    inputs:
+      max_pages:
+        description: "Cuantas paginas intentar"
+        required: false
+        default: "10"
+      limit:
+        description: "Cuantos perfumes maximo guardar"
+        required: false
+        default: "200"
+  schedule:
+    - cron: "15 2 * * *"  # diario 02:15 UTC
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Run scraper
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          START_URL: "https://www.parfumo.com/Perfumes/Tops/Men"
+          MAX_PAGES: ${{ github.event.inputs.max_pages || '10' }}
+          LIMIT: ${{ github.event.inputs.limit || '200' }}
+        run: python scrape_parfumo.py
