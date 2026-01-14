@@ -9,23 +9,29 @@ import requests
 from bs4 import BeautifulSoup
 import psycopg2
 
+# ====== Config ======
 DB_URL = os.environ["DATABASE_URL"]
 
 BASE = "https://www.parfumo.com"
-START_INDEX = "https://www.parfumo.com/Perfumes/Tops/Men"  # MVP index
+START_INDEX = "https://www.parfumo.com/Perfumes/Tops/Men"  # para modo top_men
+
 SOURCE_NAME = "parfumo"
 SOURCE_BASE_URL = "https://www.parfumo.com"
 
-MODE = os.environ.get("MODE", "top_men")   # top_men | brand
-BRAND = os.environ.get("BRAND", "").strip()
+MODE = os.environ.get("MODE", "top_men").strip()   # top_men | brand
+BRAND = os.environ.get("BRAND", "").strip()        # ejemplo: Dior
+LIMIT = int(os.environ.get("LIMIT", "10"))
+
 UA = "NuvioPerfumeriaBot/0.1 (respectful; contact: your-email@example.com)"
 
+# ====== Helpers ======
 def norm(s: str) -> str:
     s = (s or "").strip().lower()
     s = re.sub(r"\s+", " ", s)
     return s
 
 def http_get(url: str) -> str:
+    # pequeño delay para ser respetuosos
     time.sleep(1.0 + random.random() * 0.5)
     r = requests.get(url, headers={"User-Agent": UA}, timeout=30)
     r.raise_for_status()
@@ -34,32 +40,33 @@ def http_get(url: str) -> str:
 def extract_perfume_urls_from_index(html: str, limit: int, brand_slug: str | None = None) -> list[str]:
     """
     Extrae URLs de perfumes desde páginas Top o Brand.
-    Para Brand pages, filtra estrictamente por /Perfumes/<Brand>/slug
+    Para Brand pages, filtra estrictamente por /Perfumes/<Brand>/slug.
     """
     soup = BeautifulSoup(html, "lxml")
-    urls = []
-    seen = set()
+    urls: list[str] = []
+    seen: set[str] = set()
 
     for a in soup.select("a[href]"):
         href = a.get("href", "").strip()
         if not href:
             continue
 
-        # Normalizamos
+        # Solo perfumes (evitamos otros enlaces del sitio)
         if not href.startswith("/Perfumes/"):
             continue
 
         parts = href.strip("/").split("/")
+        # Debe ser: /Perfumes/<Brand>/<Slug>
         if len(parts) < 3:
             continue
 
-        _, brand, slug = parts[:3]
+        _, brand_part, slug = parts[:3]
 
-        # Si estamos en modo brand, exigimos que coincida la marca
-        if brand_slug and brand.lower() != brand_slug.lower():
+        # Si estamos en modo brand, la marca debe coincidir
+        if brand_slug and brand_part.lower() != brand_slug.lower():
             continue
 
-        # Evitar links genéricos o duplicados
+        # Evita rutas genéricas
         if slug.lower() in {"reviews", "ratings", "images"}:
             continue
 
@@ -75,9 +82,21 @@ def extract_perfume_urls_from_index(html: str, limit: int, brand_slug: str | Non
 
     return urls
 
+def parse_brand_from_url(url: str) -> str:
+    # https://www.parfumo.com/Perfumes/Dior/Sauvage -> "Dior"
+    parts = url.split("/")
+    idx = parts.index("Perfumes")
+    brand_slug = parts[idx + 1]
+    return brand_slug.replace("_", " ").strip()
+
 def parse_gender_year_and_name(soup: BeautifulSoup) -> tuple[str | None, int | None, str | None]:
+    """
+    Parfumo suele incluir texto tipo:
+    "A perfume by Dior for men, released in 2015."
+    """
     text = soup.get_text("\n", strip=True)
 
+    # year
     year = None
     m = re.search(r"released in\s+(\d{4})", text, re.IGNORECASE)
     if m:
@@ -87,6 +106,7 @@ def parse_gender_year_and_name(soup: BeautifulSoup) -> tuple[str | None, int | N
         if m2:
             year = int(m2.group(0))
 
+    # gender
     gender = None
     if re.search(r"for women and men|for men and women", text, re.IGNORECASE):
         gender = "unisex"
@@ -95,6 +115,7 @@ def parse_gender_year_and_name(soup: BeautifulSoup) -> tuple[str | None, int | N
     elif re.search(r"\bfor women\b", text, re.IGNORECASE):
         gender = "female"
 
+    # name
     name = None
     h1 = soup.select_one("h1")
     if h1:
@@ -102,38 +123,33 @@ def parse_gender_year_and_name(soup: BeautifulSoup) -> tuple[str | None, int | N
 
     return gender, year, name
 
-def parse_brand_from_url(url: str) -> str:
-    # https://www.parfumo.com/Perfumes/Dior/sauvage
-    parts = url.split("/")
-    if "Perfumes" in parts:
-        idx = parts.index("Perfumes")
-    else:
-        idx = parts.index("Parfums")
-    brand_slug = parts[idx + 1]
-    return brand_slug.replace("_", " ").strip()
-
 def parse_notes_and_perfumers(soup: BeautifulSoup) -> tuple[list[tuple[str, str]], list[str]]:
+    """
+    Busca en el texto secciones tipo:
+    - Perfumer
+    - Top Notes / Heart Notes / Base Notes
+    """
     text = soup.get_text("\n", strip=True)
-    lines = text.split("\n")
+    lines = [ln.strip() for ln in text.split("\n") if ln.strip()]
 
-    # Perfumer
+    # Perfumers
     perfumers: list[str] = []
     for i, line in enumerate(lines):
-        if line.strip().lower() == "perfumer":
+        if line.lower() == "perfumer":
             j = i + 1
             while j < len(lines):
                 nxt = lines[j].strip()
-                if not nxt:
-                    j += 1
-                    continue
                 low = nxt.lower()
                 if low in {"ratings", "rating", "fragrance pyramid", "top notes", "heart notes", "base notes"}:
                     break
-                if len(nxt) <= 80 and "ratings" not in low:
+                # filtro simple
+                if len(nxt) <= 80:
                     perfumers.append(nxt)
                 j += 1
             break
+    perfumers = list(dict.fromkeys([p for p in perfumers if p]))
 
+    # Notes
     notes: list[tuple[str, str]] = []
 
     def collect_after(label: str, pos: str):
@@ -143,17 +159,13 @@ def parse_notes_and_perfumers(soup: BeautifulSoup) -> tuple[list[tuple[str, str]
         j = idx + 1
         while j < len(lines):
             nxt = lines[j].strip()
-            if not nxt:
-                j += 1
-                continue
             low = nxt.lower()
-            if low in {"heart notes", "base notes", "top notes", "perfumer", "ratings", "rating"}:
+            if low in {"top notes", "heart notes", "base notes", "perfumer", "ratings", "rating"}:
                 break
-            if len(nxt) <= 40 and not low.startswith("image:"):
+            if len(nxt) <= 40:
                 notes.append((nxt, pos))
             j += 1
 
-    # Pirámide
     if "Top Notes" in lines:
         collect_after("Top Notes", "top")
     if "Heart Notes" in lines:
@@ -161,19 +173,20 @@ def parse_notes_and_perfumers(soup: BeautifulSoup) -> tuple[list[tuple[str, str]
     if "Base Notes" in lines:
         collect_after("Base Notes", "base")
 
-    # dedupe
-    perfumers = list(dict.fromkeys([p.strip() for p in perfumers if p.strip()]))
-    seen_notes = set()
+    # dedupe notes
+    seen = set()
     clean_notes = []
     for n, pos in notes:
         key = (norm(n), pos)
-        if key not in seen_notes:
-            seen_notes.add(key)
+        if key not in seen:
+            seen.add(key)
             clean_notes.append((n, pos))
 
     return clean_notes, perfumers
 
+# ====== DB Upsert ======
 def db_upsert(cur, data: dict) -> int:
+    # source
     cur.execute(
         "INSERT INTO source(name, base_url, reliability) "
         "VALUES (%s, %s, 80) "
@@ -183,6 +196,7 @@ def db_upsert(cur, data: dict) -> int:
     )
     source_id = cur.fetchone()[0]
 
+    # brand
     cur.execute(
         "INSERT INTO brand(name, name_norm) "
         "VALUES (%s, %s) "
@@ -192,6 +206,7 @@ def db_upsert(cur, data: dict) -> int:
     )
     brand_id = cur.fetchone()[0]
 
+    # perfume
     cur.execute(
         "INSERT INTO perfume(brand_id, name, name_norm, year, concentration, gender) "
         "VALUES (%s, %s, %s, %s, %s, %s) "
@@ -202,6 +217,7 @@ def db_upsert(cur, data: dict) -> int:
     )
     perfume_id = cur.fetchone()[0]
 
+    # perfumers
     for p in data.get("perfumers", []):
         cur.execute(
             "INSERT INTO perfumer(name, name_norm) "
@@ -218,6 +234,7 @@ def db_upsert(cur, data: dict) -> int:
             (perfume_id, perfumer_id, "creator"),
         )
 
+    # notes
     for n, pos in data.get("notes", []):
         cur.execute(
             "INSERT INTO note(name, name_norm) "
@@ -234,6 +251,7 @@ def db_upsert(cur, data: dict) -> int:
             (perfume_id, note_id, pos),
         )
 
+    # perfume_source
     cur.execute(
         "INSERT INTO perfume_source(perfume_id, source_id, url, raw_json) "
         "VALUES (%s, %s, %s, %s) "
@@ -244,14 +262,13 @@ def db_upsert(cur, data: dict) -> int:
 
     return perfume_id
 
+# ====== Scrape One ======
 def scrape_one(url: str) -> dict:
     html = http_get(url)
     soup = BeautifulSoup(html, "lxml")
 
     brand = parse_brand_from_url(url)
     gender, year, name_h1 = parse_gender_year_and_name(soup)
-
-    # nombre fallback
     name = name_h1 or url.rstrip("/").split("/")[-1].replace("-", " ").strip()
 
     notes, perfumers = parse_notes_and_perfumers(soup)
@@ -268,32 +285,26 @@ def scrape_one(url: str) -> dict:
         "notes": notes,
     }
 
+# ====== Main ======
 def main():
-    limit = int(os.environ.get("LIMIT", "10"))
-
     if MODE == "top_men":
         index_html = http_get(START_INDEX)
-        urls = extract_perfume_urls_from_index(index_html, limit)
+        urls = extract_perfume_urls_from_index(index_html, LIMIT)
         print(f"Index OK (top_men). Encontradas {len(urls)} URLs.")
 
     elif MODE == "brand":
-    if not BRAND:
-        raise ValueError("Falta BRAND. Ejemplo: BRAND=Dior")
+        if not BRAND:
+            raise ValueError("Falta BRAND. Ejemplo: BRAND=Dior")
 
-    brand_slug = BRAND.replace(" ", "_")
-    brand_url = f"{BASE}/Perfumes/{brand_slug}"
-    index_html = http_get(brand_url)
+        brand_slug = BRAND.replace(" ", "_")
+        brand_url = f"{BASE}/Perfumes/{brand_slug}"
+        index_html = http_get(brand_url)
 
-    urls = extract_perfume_urls_from_index(
-        index_html,
-        limit=limit,
-        brand_slug=brand_slug
-    )
-
-    print(f"Index OK (brand={BRAND}). Encontradas {len(urls)} URLs desde {brand_url}")
+        urls = extract_perfume_urls_from_index(index_html, LIMIT, brand_slug=brand_slug)
+        print(f"Index OK (brand={BRAND}). Encontradas {len(urls)} URLs desde {brand_url}")
 
     else:
-        raise ValueError(f"MODE inválido: {MODE}. Usa top_men o brand")
+        raise ValueError("MODE inválido. Usa top_men o brand")
 
     if not urls:
         print("AVISO: 0 URLs encontradas. Revisa BRAND o la estructura HTML.")
