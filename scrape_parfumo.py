@@ -277,13 +277,20 @@ def main():
         print(f"Index OK (top_men). Encontradas {len(urls)} URLs.")
 
     elif MODE == "brand":
-        if not BRAND:
-            raise ValueError("Falta BRAND. Ejemplo: BRAND=Dior")
-        brand_slug = BRAND.replace(" ", "_")
-        brand_url = f"{BASE}/Perfumes/{brand_slug}"
-        index_html = http_get(brand_url)
-        urls = extract_perfume_urls_from_index(index_html, limit)
-        print(f"Index OK (brand={BRAND}). Encontradas {len(urls)} URLs desde {brand_url}")
+    if not BRAND:
+        raise ValueError("Falta BRAND. Ejemplo: BRAND=Dior")
+
+    brand_slug = BRAND.replace(" ", "_")
+    brand_url = f"{BASE}/Perfumes/{brand_slug}"
+    index_html = http_get(brand_url)
+
+    urls = extract_perfume_urls_from_index(
+        index_html,
+        limit=limit,
+        brand_slug=brand_slug
+    )
+
+    print(f"Index OK (brand={BRAND}). Encontradas {len(urls)} URLs desde {brand_url}")
 
     else:
         raise ValueError(f"MODE inválido: {MODE}. Usa top_men o brand")
