@@ -1,20 +1,22 @@
-name: Scrape Parfumo
+name: Scrape Parfumo (Top Lists)
 
 on:
   workflow_dispatch:
     inputs:
-      mode:
-        description: "Modo de scraping: top_men o brand"
+      start_url:
+        description: "URL del listado (ej: https://www.parfumo.com/Perfumes/Tops/Men)"
         required: false
-        default: "top_men"
-      brand:
-        description: "Marca (solo si mode=brand). Ej: Dior"
+        default: "https://www.parfumo.com/Perfumes/Tops/Men"
+      max_pages:
+        description: "Cuantas paginas intentar"
         required: false
-        default: ""
+        default: "5"
       limit:
-        description: "Cuantos perfumes scrapear (ej 10, 50, 100)"
+        description: "Cuantos perfumes maximo guardar"
         required: false
-        default: "10"
+        default: "20"
+  schedule:
+    - cron: "0 */12 * * *"  # cada 12h UTC (puedes cambiarlo luego)
 
 jobs:
   scrape:
@@ -33,7 +35,7 @@ jobs:
       - name: Run scraper
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
-          MODE: ${{ github.event.inputs.mode }}
-          BRAND: ${{ github.event.inputs.brand }}
-          LIMIT: ${{ github.event.inputs.limit }}
+          START_URL: ${{ github.event.inputs.start_url || 'https://www.parfumo.com/Perfumes/Tops/Men' }}
+          MAX_PAGES: ${{ github.event.inputs.max_pages || '5' }}
+          LIMIT: ${{ github.event.inputs.limit || '20' }}
         run: python scrape_parfumo.py
